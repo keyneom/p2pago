@@ -1,0 +1,57 @@
+{
+  "name": "@p2pago/zkp2p-donate",
+  "version": "0.1.0",
+  "description": "Client-side SDK for ZKP2P donations, support status, and HTTP 402 payment flows",
+  "main": "dist/cjs/index.js",
+  "module": "dist/esm/index.js",
+  "types": "dist/esm/index.d.ts",
+  "unpkg": "dist/umd/zkp2p-donate.js",
+  "exports": {
+    ".": {
+      "import": "./dist/esm/index.js",
+      "require": "./dist/cjs/index.js",
+      "types": "./dist/esm/index.d.ts"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "npm run build:esm && npm run build:cjs && npm run build:umd",
+    "build:docs": "npm run build && node -e \"require('fs').copyFileSync('dist/umd/zkp2p-donate.js','docs/zkp2p-donate.js')\"",
+    "test:demo": "npm run build && echo 'Open http://localhost:3000/test/demo.html?local=1' && npx serve .",
+    "build:esm": "tsc -p tsconfig.esm.json",
+    "build:cjs": "tsc -p tsconfig.cjs.json",
+    "build:umd": "rollup -c rollup.config.js"
+  },
+  "keywords": [
+    "zkp2p",
+    "donation",
+    "venmo",
+    "crypto",
+    "402"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@rollup/plugin-commonjs": "^25.0.7",
+    "@rollup/plugin-json": "^6.1.0",
+    "@rollup/plugin-node-resolve": "^15.2.3",
+    "@rollup/plugin-typescript": "^11.1.6",
+    "@types/node": "^20.10.0",
+    "rollup": "^4.9.0",
+    "typescript": "^5.3.0"
+  },
+  "dependencies": {
+    "@zkp2p/sdk": "^0.0.10",
+    "ethers": "^5.0.0 || ^6.0.0"
+  },
+  "peerDependencies": {
+    "ethers": "^5.0.0 || ^6.0.0"
+  },
+  "peerDependenciesMeta": {
+    "ethers": {
+      "optional": true
+    }
+  }
+}

@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>p2pago SDK Test</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 480px; margin: 2rem auto; padding: 0 1rem; }
+    button { padding: 0.75rem 1.5rem; font-size: 1rem; cursor: pointer; }
+    .status { margin: 1rem 0; padding: 0.5rem; background: #f0f0f0; border-radius: 4px; font-size: 0.9rem; }
+    .error { background: #fee; }
+    .info { color: #666; font-size: 0.85rem; margin-top: 1.5rem; }
+  </style>
+</head>
+<body>
+  <h1>p2pago SDK Test</h1>
+  <p>Loads the SDK from GitHub (jsDelivr). Requires <code>dist/</code> to be committed and pushed.</p>
+
+  <div id="status" class="status">Loading SDK…</div>
+
+  <button id="donate-btn" disabled>Donate $5 (redirect flow)</button>
+
+  <p class="info">
+    <strong>Local test:</strong> Add <code>?local=1</code> to the URL and run
+    <code>npm run build && npx serve .</code> from the repo root, then open
+    <code>http://localhost:3000/test/demo.html?local=1</code>
+  </p>
+
+  <script>
+    (function () {
+      var params = new URLSearchParams(location.search);
+      var isLocal = params.get('local') === '1';
+      var src = isLocal
+        ? '../dist/umd/zkp2p-donate.js'
+        : 'https://cdn.jsdelivr.net/gh/keyneom/p2pago@main/dist/umd/zkp2p-donate.js';
+
+      var script = document.createElement('script');
+      script.src = src;
+      script.onload = function () {
+        var status = document.getElementById('status');
+        var btn = document.getElementById('donate-btn');
+
+        if (typeof window.Zkp2pDonate === 'undefined') {
+          status.textContent = 'Error: Zkp2pDonate not found on window.';
+          status.classList.add('error');
+          return;
+        }
+
+        var sdk = window.Zkp2pDonate;
+        status.textContent = 'SDK loaded. ' + (isLocal ? '(local)' : '(GitHub)');
+        btn.disabled = false;
+
+        btn.onclick = function () {
+          try {
+            sdk.openDonation({
+              amountUsd: 5,
+              openInstallPageIfMissing: true,
+            });
+            status.textContent = 'Opened onramp. Check the Peer extension panel.';
+          } catch (e) {
+            status.textContent = 'Error: ' + e.message;
+            status.classList.add('error');
+          }
+        };
+      };
+      script.onerror = function () {
+        document.getElementById('status').textContent =
+          'Failed to load script from ' + src + '. For GitHub: ensure dist/ is committed and pushed.';
+        document.getElementById('status').classList.add('error');
+      };
+      document.head.appendChild(script);
+    })();
+  </script>
+</body>
+</html>
