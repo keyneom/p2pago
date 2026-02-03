@@ -96,7 +96,11 @@ import {
   verifyIntent,
   getWalletStatus,
   getZkp2pStatus,
+  whenExtensionAvailable,
   isSmallDonation,
+  resolveRecipient,
+  verifyPaymentTx,
+  getSupportedChains,
   ZKP2P_EXTENSION_INSTALL_URL,
   P2PAGO_DEFAULT_RECIPIENT,
   P2PAGO_DEFAULT_REFERRER,
@@ -106,13 +110,17 @@ import {
 
 ### Browser (script tag)
 
+The UMD bundle expects **`window.ethers`** at load time (used by the bundled Peer SDK). Load ethers before the SDK:
+
 **From npm** (after publish):
 ```html
+<script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
 <script src="https://unpkg.com/@p2pago/zkp2p-donate/dist/umd/zkp2p-donate.js"></script>
 ```
 
 **From GitHub** (before npm publish, or for testing). Requires `dist/` to be committed:
 ```html
+<script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/gh/keyneom/p2pago@main/dist/umd/zkp2p-donate.js"></script>
 ```
 
@@ -169,7 +177,7 @@ if (zkp2p.available) {
 - Donors don't know who else has paid
 - Observers (including anyone with your ENS) cannot trace how many payments went to your account or link payments together
 
-Use your FluidKey ENS anywhere you'd use a raw address: `getQuote`, `handle402`, 402 response body, etc. The SDK resolves ENS automatically when you pass a provider.
+Use your FluidKey ENS anywhere you'd use a raw address: `getQuote`, `handle402`, 402 response body, etc. The SDK resolves ENS automatically: pass a `provider` in options, or omit it and the SDK will use a default mainnet provider (requires ethers; uses `DEFAULT_MAINNET_RPC_URL`).
 
 ```js
 // Use FluidKey ENS for recipient privacy
@@ -336,7 +344,7 @@ if (res.status === 402) {
 | `runZkp2pDonation(options)`                           | Quote → verify (callback) → signalIntent. Returns `{ intentHash, payeeAddress, platform }`. |
 | `completeZkp2pDonation(signer, intentHash, platform)` | Generate proof → fulfillIntent. Call after user pays.                                       |
 
-**getQuote options:** `recipient`, `amountUsd`, `userAddress` (required), `platform?`, `chainId?`, `destinationToken?`, `provider?` (for ENS), `apiBaseUrl?`.
+**getQuote options:** `recipient`, `amountUsd`, `userAddress` (required), `platform?`, `chainId?`, `destinationToken?`, `provider?` (for ENS; optional if ethers is installed — SDK uses default mainnet RPC), `apiBaseUrl?`.
 
 **Signer** (ethers/viem compatible): `getAddress(): Promise<string>`, `sendTransaction(tx): Promise<{ hash }>`.
 
@@ -353,20 +361,27 @@ if (res.status === 402) {
 | -------------------------- | ----------------------------------------------------------- |
 | `handle402(body, options)` | Parse 402 body, pay (crypto or ZKP2P), return PaymentProof. |
 
-**handle402 options:** `signer`, `recipient`, `useZkp2p`, `verifyUrl?` (required when useZkp2p), `provider?` (for ENS).
+**handle402 options:** `signer`, `recipient`, `useZkp2p`, `verifyUrl?` (required when useZkp2p), `provider?` (for ENS; optional if ethers is installed).
+
+### Resolve recipient and verify direct payments
+
+- **`resolveRecipient(recipient, options?)`** — Resolve ENS or 0x to a 0x address. Options: `provider?` (omit to use SDK default mainnet provider; requires ethers). Use for "pay with wallet" when you show a resolved address or need to verify the recipient.
+- **`verifyPaymentTx(params)`** — Verify that a direct payment tx succeeded and value reached the recipient. Params: `txHash`, `chainId`, `recipientAddress`, optional `tokenAddress` (omit for native transfer), optional `rpcUrl` (override chain RPC). Uses `getSupportedChains()` for RPC by default. Returns `true` only if the tx succeeded and the recipient received the payment (native or ERC20 Transfer).
+- **`getSupportedChains()`** / **`SUPPORTED_CHAINS`** — Chain config: `Record<chainId, { name, chainId, rpcUrl?, tokens? }>`. Default chains: Ethereum (1), Base (8453), Polygon (137), Arbitrum One (42161), OP Mainnet (10). Each chain includes default tokens: native ETH, USDC, USDT (address, symbol, decimals). Apps can subset or extend for "pay with wallet" UI and pass custom RPC to `verifyPaymentTx` if needed. Types: `ChainConfig`, `TokenConfig`. Constants: `NATIVE_TOKEN_ADDRESS`, `ERC20_TRANSFER_TOPIC` for advanced use.
 
 ### Capability detection
 
-| Function            | Returns                                                                  |
-| ------------------- | ------------------------------------------------------------------------ |
-| `getWalletStatus()` | `{ available: boolean }` (checks `window.ethereum`)                      |
-| `getZkp2pStatus()`  | `{ available: boolean, needsInstall?: boolean }` (checks `window.zktls`) |
+| Function                           | Returns                                                                                                                                                                                            |
+| ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `getWalletStatus()`                | `{ available: boolean }` (checks `window.ethereum`)                                                                                                                                                |
+| `getZkp2pStatus()`                 | `{ available, needsInstall?, proofAvailable? }` — `available` when redirect onramp can open (`window.peer` or `window.zktls`); `proofAvailable` when proof generation is possible (`window.zktls`) |
+| `whenExtensionAvailable(options?)` | `Promise<void>` — wait for extension (e.g. after async injection); listens for `zktls#initialized` and polls until available or `timeoutMs` (default 3000)                                         |
 
 ---
 
 ## PeerAuth extension
 
-The ZKP2P (Venmo / Cash App) path requires the **PeerAuth browser extension**. When the extension is not installed, `generateAndEncodeProof` and ZKP2P flows throw a clear error with the install URL. Use `getZkp2pStatus()` to check availability and show an install prompt with `ZKP2P_EXTENSION_INSTALL_URL` before starting the flow.
+The ZKP2P (Venmo / Cash App) path requires the **Peer extension**. The redirect onramp (`openDonation` / `openRedirectOnramp`) uses `window.peer` (Peer SDK); proof generation (`generateAndEncodeProof`) uses `window.zktls`. The SDK treats extension as **available** when either `peer` or `zktls` is present, so the onramp can open in environments where only `peer` is injected. Use `getZkp2pStatus().proofAvailable` if you need to know whether the user can complete the headless proof step. When the extension is not installed, `generateAndEncodeProof` throws with the install URL. Use `getZkp2pStatus()` to drive your UI and `whenExtensionAvailable({ timeoutMs })` to avoid flashing "not installed" when the extension injects after load.
 
 ---
 
@@ -378,7 +393,7 @@ The SDK does **not** implement the server. For 402 to work, your server must:
 
 1. **Return 402** with a JSON body that includes at least: `recipient`, `chainId`, and optionally `amountWei` / `amountFormatted`, `label`, and `zkp2p.verifyUrl` if you support ZKP2P.
 2. **Accept proof** on retry: e.g. `Payment-Proof` header or body field, containing something like `{ type, chainId, txHash, recipient?, amount? }`.
-3. **Verify**: Look up `txHash` on `chainId` (e.g. via public RPC or indexer). Confirm the tx succeeded and that it transferred value to `recipient`. Optionally check amount. Then return 200 and grant access (e.g. set cookie, return resource).
+3. **Verify**: Use the SDK's `verifyPaymentTx({ txHash, chainId, recipientAddress, tokenAddress? })` (or your own RPC check). Confirm the tx succeeded and value reached `recipient`. Then return 200 and grant access (e.g. set cookie, return resource).
 
 No ZKP2P-specific server logic is required for verification: both crypto and ZKP2P end in an on-chain tx that pays you; the server only needs to verify that tx.
 
@@ -386,14 +401,17 @@ No ZKP2P-specific server logic is required for verification: both crypto and ZKP
 
 ## Constants
 
-| Constant                                   | Description                              |
-| ------------------------------------------ | ---------------------------------------- |
-| `P2PAGO_DEFAULT_RECIPIENT`                 | Default recipient: `p2pago.fkey.id`      |
-| `P2PAGO_DEFAULT_REFERRER`                  | Default referrer string: `"p2pago"`      |
-| `MIN_DONATION_WARNING_USD`                 | Small-donation warning threshold: $2     |
-| `ZKP2P_EXTENSION_INSTALL_URL`              | Chrome Web Store link for Peer extension |
-| `P2PAGO_FEE_PERCENT`, `P2PAGO_FEE_MIN_USD` | Reserved for future use                  |
-| `GAS_COST_MAX_FRACTION`                    | Reserved for future use                  |
+| Constant                                       | Description                                                                           |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `P2PAGO_DEFAULT_RECIPIENT`                     | Default recipient: `p2pago.fkey.id`                                                   |
+| `P2PAGO_DEFAULT_REFERRER`                      | Default referrer string: `"p2pago"`                                                   |
+| `DEFAULT_MAINNET_RPC_URL`                      | Default RPC URL for ENS resolution when no provider is passed                         |
+| `MIN_DONATION_WARNING_USD`                     | Small-donation warning threshold: $2                                                  |
+| `ZKP2P_EXTENSION_INSTALL_URL`                  | Chrome Web Store link for Peer extension                                              |
+| `SUPPORTED_CHAINS`, `getSupportedChains()`     | Chain config (name, rpcUrl, tokens) for Base, Ethereum, Polygon, Arbitrum, OP Mainnet |
+| `NATIVE_TOKEN_ADDRESS`, `ERC20_TRANSFER_TOPIC` | For native/ERC20 verification (advanced)                                              |
+| `P2PAGO_FEE_PERCENT`, `P2PAGO_FEE_MIN_USD`     | Reserved for future use                                                               |
+| `GAS_COST_MAX_FRACTION`                        | Reserved for future use                                                               |
 
 ---
 

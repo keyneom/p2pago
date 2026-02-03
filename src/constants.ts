@@ -15,6 +15,9 @@ export const USDC_ADDRESS = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913' as cons
 /** ZKP2P API base URL (v1) */
 export const ZKP2P_API_BASE_URL = 'https://api.zkp2p.xyz/v1' as const;
 
+/** Default Ethereum mainnet RPC URL used for ENS resolution when no provider is passed */
+export const DEFAULT_MAINNET_RPC_URL = 'https://ethereum.publicnode.com' as const;
+
 /** PeerAuth extension Chrome Web Store install URL */
 export const ZKP2P_EXTENSION_INSTALL_URL =
   'https://chromewebstore.google.com/detail/zkp2p-extension/ijpgccednehjpeclfcllnjjcmiohdjih' as const;

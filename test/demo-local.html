@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>p2pago SDK Test (local)</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 560px; margin: 2rem auto; padding: 0 1rem; }
+    button { padding: 0.5rem 1rem; font-size: 0.95rem; cursor: pointer; margin: 0.25rem 0.25rem 0.25rem 0; }
+    .status { margin: 1rem 0; padding: 0.5rem; background: #f0f0f0; border-radius: 4px; font-size: 0.9rem; white-space: pre-wrap; }
+    .error { background: #fee; }
+    .ok { background: #efe; }
+    h2 { font-size: 1rem; margin-top: 1.5rem; }
+  </style>
+</head>
+<body>
+  <h1>p2pago SDK Test (local)</h1>
+  <p>Loads ethers, then the local UMD bundle. Run <code>npm run build</code> then <code>npx serve .</code> and open this page.</p>
+
+  <div id="status" class="status">Loading…</div>
+
+  <h2>Redirect flow</h2>
+  <button id="donate-btn" disabled>Donate $5 (redirect flow)</button>
+
+  <h2>Smoke (new APIs)</h2>
+  <button id="smoke-btn" disabled>Run smoke checks</button>
+  <div id="smoke-result" class="status" style="display:none;"></div>
+
+  <!-- Order matters: ethers must run first. jsDelivr (cdn.ethers.io can fail to resolve in some environments). -->
+  <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
+  <script src="../dist/umd/zkp2p-donate.js"></script>
+  <script>
+    (function () {
+      var statusEl = document.getElementById('status');
+      var donateBtn = document.getElementById('donate-btn');
+      var smokeBtn = document.getElementById('smoke-btn');
+      var smokeResult = document.getElementById('smoke-result');
+
+      function showError(msg) {
+        statusEl.textContent = msg;
+        statusEl.classList.add('error');
+      }
+
+      if (typeof window.Zkp2pDonate === 'undefined') {
+        showError('Error: Zkp2pDonate not found. Run npm run build.');
+        return;
+      }
+
+      var sdk = window.Zkp2pDonate;
+      if (typeof sdk.openDonation !== 'function') {
+        showError('Error: SDK failed to initialize (Zkp2pDonate is empty). Hard refresh (Ctrl+Shift+R) to clear cache.');
+        return;
+      }
+
+      var ethersOk = typeof window.ethers !== 'undefined';
+      statusEl.textContent = ethersOk
+        ? 'SDK loaded (local UMD).'
+        : 'SDK loaded (ethers did not load — ENS resolution will need a provider).';
+      statusEl.classList.add('ok');
+      donateBtn.disabled = false;
+      smokeBtn.disabled = false;
+
+      donateBtn.onclick = function () {
+        try {
+          sdk.openDonation({
+            amountUsd: 5,
+            openInstallPageIfMissing: true,
+          });
+          statusEl.textContent = 'Opened onramp. Check the Peer extension panel.';
+        } catch (e) {
+          statusEl.textContent = 'Error: ' + e.message;
+          statusEl.classList.add('error');
+        }
+      };
+
+      smokeBtn.onclick = function () {
+        smokeResult.style.display = 'block';
+        smokeResult.classList.remove('ok', 'error');
+        var lines = [];
+        try {
+          var status2 = sdk.getZkp2pStatus();
+          lines.push('getZkp2pStatus: available=' + status2.available + ', proofAvailable=' + status2.proofAvailable);
+          var chains = sdk.getSupportedChains();
+          var chainIds = Object.keys(chains || {});
+          lines.push('getSupportedChains: ' + chainIds.length + ' chains');
+          if (chains[8453]) {
+            lines.push('  Base: ' + chains[8453].name + ', tokens: ' + (chains[8453].tokens ? chains[8453].tokens.length : 0));
+          }
+          lines.push('whenExtensionAvailable: ' + (typeof sdk.whenExtensionAvailable === 'function' ? 'OK' : 'MISSING'));
+          lines.push('resolveRecipient: ' + (typeof sdk.resolveRecipient === 'function' ? 'OK' : 'MISSING'));
+          lines.push('verifyPaymentTx: ' + (typeof sdk.verifyPaymentTx === 'function' ? 'OK' : 'MISSING'));
+          lines.push('SUPPORTED_CHAINS: ' + (sdk.SUPPORTED_CHAINS ? 'OK' : 'MISSING'));
+          lines.push('NATIVE_TOKEN_ADDRESS: ' + (sdk.NATIVE_TOKEN_ADDRESS || 'MISSING'));
+          smokeResult.textContent = lines.join('\n');
+          smokeResult.classList.add('ok');
+        } catch (e) {
+          smokeResult.textContent = 'Smoke error: ' + e.message;
+          smokeResult.classList.add('error');
+        }
+      };
+    })();
+  </script>
+</body>
+</html>
