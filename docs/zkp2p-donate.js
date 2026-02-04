@@ -5,41 +5,6 @@
 })(this, (function (exports, ethers) { 'use strict';
 
     /**
-     * Address resolution — ENS (including FluidKey) or raw 0x address
-     */
-    const HEX_REGEX = /^0x[a-fA-F0-9]{40}$/;
-    /** Check if input looks like a raw Ethereum address */
-    function isAddress(value) {
-        return HEX_REGEX.test(value);
-    }
-    /**
-     * Resolve recipient to address. If ENS (e.g. FluidKey *.fkey.eth), resolve via provider.
-     * With FluidKey, each resolution returns a unique stealth address for recipient privacy.
-     */
-    async function resolveAddress(recipient, provider) {
-        if (isAddress(recipient)) {
-            return recipient;
-        }
-        if (!provider) {
-            throw new Error('ENS resolution requires a provider. Pass provider in options when recipient is an ENS name (e.g. myapp.fkey.eth).');
-        }
-        let resolved = null;
-        if (provider.resolveName) {
-            resolved = await provider.resolveName(recipient);
-        }
-        else if (provider.getResolver) {
-            const resolver = await provider.getResolver(recipient);
-            if (resolver?.resolve) {
-                resolved = await resolver.resolve(recipient);
-            }
-        }
-        if (!resolved) {
-            throw new Error(`Failed to resolve ENS name: ${recipient}`);
-        }
-        return resolved;
-    }
-
-    /**
      * ZKP2P Donate SDK constants
      * Base mainnet values; override via config when needed.
      */
@@ -49,6 +14,8 @@
     const BASE_CHAIN_ID = 8453;
     /** ZKP2P API base URL (v1) */
     const ZKP2P_API_BASE_URL = 'https://api.zkp2p.xyz/v1';
+    /** Default Ethereum mainnet RPC URL used for ENS resolution when no provider is passed */
+    const DEFAULT_MAINNET_RPC_URL = 'https://ethereum.publicnode.com';
     /** PeerAuth extension Chrome Web Store install URL */
     const ZKP2P_EXTENSION_INSTALL_URL = 'https://chromewebstore.google.com/detail/zkp2p-extension/ijpgccednehjpeclfcllnjjcmiohdjih';
     /** Default recipient when no app recipient specified (FluidKey ENS) */
@@ -62,6 +29,78 @@
     const GAS_COST_MAX_FRACTION = 0.5;
     /** Amount threshold below which a small-donation warning may be shown. */
     const MIN_DONATION_WARNING_USD = 2;
+
+    /**
+     * Default RPC provider for ENS resolution (mainnet).
+     * Used when callers do not pass a provider. Lazy singleton; ethers v5/v6 compatible.
+     */
+    let cached = null;
+    /**
+     * Return a mainnet provider suitable for ENS resolution when no provider is passed.
+     * Uses ethers (v5 or v6) if available; returns null otherwise so callers can throw
+     * a clear error. Cached after first successful creation.
+     */
+    async function getDefaultProvider() {
+        if (cached)
+            return cached;
+        try {
+            const m = await import('ethers');
+            const ethers = m.default ?? m;
+            const RpcProvider = ethers.JsonRpcProvider ??
+                ethers.providers?.JsonRpcProvider;
+            if (!RpcProvider)
+                return null;
+            cached = new RpcProvider(DEFAULT_MAINNET_RPC_URL);
+            return cached;
+        }
+        catch {
+            return null;
+        }
+    }
+
+    /**
+     * Address resolution — ENS (including FluidKey) or raw 0x address
+     */
+    const HEX_REGEX = /^0x[a-fA-F0-9]{40}$/;
+    /** Check if input looks like a raw Ethereum address */
+    function isAddress(value) {
+        return HEX_REGEX.test(value);
+    }
+    /**
+     * Resolve recipient to address. If ENS (e.g. FluidKey *.fkey.eth), resolve via provider.
+     * When no provider is passed, uses a default mainnet provider (requires ethers).
+     * With FluidKey, each resolution returns a unique stealth address for recipient privacy.
+     */
+    async function resolveAddress(recipient, provider) {
+        if (isAddress(recipient)) {
+            return recipient;
+        }
+        const effectiveProvider = provider ?? (await getDefaultProvider());
+        if (!effectiveProvider) {
+            throw new Error('ENS resolution requires a provider. Pass provider in options when recipient is an ENS name (e.g. myapp.fkey.eth), or ensure ethers is installed for default mainnet resolution.');
+        }
+        let resolved = null;
+        if (effectiveProvider.resolveName) {
+            resolved = await effectiveProvider.resolveName(recipient);
+        }
+        else if (effectiveProvider.getResolver) {
+            const resolver = await effectiveProvider.getResolver(recipient);
+            if (resolver?.resolve) {
+                resolved = await resolver.resolve(recipient);
+            }
+        }
+        if (!resolved) {
+            throw new Error(`Failed to resolve ENS name: ${recipient}`);
+        }
+        return resolved;
+    }
+    /**
+     * Resolve recipient to a 0x address. Input may be ENS (e.g. p2pago.fkey.id) or already a 0x address.
+     * When no provider is passed, uses SDK default mainnet provider (requires ethers).
+     */
+    async function resolveRecipient(recipient, options = {}) {
+        return resolveAddress(recipient, options.provider);
+    }
 
     /**
      * ZKP2P REST API adapter
@@ -428,10 +467,16 @@
             provider: options.provider,
             chainId: body.chainId,
         });
+        // Resolve toAddress so verify/intent receives a 0x address (ZKP2P arrayify fails on ENS/fkey ids)
+        const resolvedToAddress = await resolveAddress(quote.intent.toAddress, options.provider);
+        const intentForVerify = {
+            ...quote.intent,
+            toAddress: resolvedToAddress,
+        };
         const verifyRes = await fetch(verifyUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(quote.intent),
+            body: JSON.stringify(intentForVerify),
         });
         if (!verifyRes.ok) {
             throw new Error(`Verify intent failed: ${verifyRes.status}`);
@@ -497,16 +542,61 @@
         }
         return { available: typeof window.ethereum !== 'undefined' };
     }
-    /** Check if ZKP2P PeerAuth extension is available via window.zktls */
+    /**
+     * Check if the Peer extension is available for the redirect onramp (Venmo/Cash App).
+     * Uses the same globals the onramp flow uses: window.peer (Peer SDK) or window.zktls.
+     * When only peer is present, openDonation/openRedirectOnramp work; proof generation requires zktls.
+     */
     function getZkp2pStatus() {
         if (typeof window === 'undefined') {
-            return { available: false, needsInstall: true };
+            return { available: false, needsInstall: true, proofAvailable: false };
         }
-        const available = typeof window.zktls !== 'undefined';
-        return { available, needsInstall: !available };
+        const peer = typeof window.peer !== 'undefined';
+        const zktls = typeof window.zktls !== 'undefined';
+        const available = peer || zktls;
+        return { available, needsInstall: !available, proofAvailable: zktls };
+    }
+    /**
+     * Wait for the Peer extension to become available (e.g. after async injection).
+     * Listens for zktls#initialized and polls getZkp2pStatus(). Resolves when available or after timeoutMs.
+     * Use before deciding to show "install extension" so UIs don't flash "not installed" when the extension is installed but not yet injected.
+     */
+    function whenExtensionAvailable(options = {}) {
+        const { timeoutMs = 3000, pollIntervalMs = 100 } = options;
+        if (typeof window === 'undefined') {
+            return Promise.resolve();
+        }
+        const status = getZkp2pStatus();
+        if (status.available) {
+            return Promise.resolve();
+        }
+        return new Promise((resolve) => {
+            const deadline = Date.now() + timeoutMs;
+            const check = () => {
+                if (getZkp2pStatus().available) {
+                    cleanup();
+                    resolve();
+                    return;
+                }
+                if (Date.now() >= deadline) {
+                    cleanup();
+                    resolve();
+                    return;
+                }
+            };
+            const onInitialized = () => {
+                check();
+            };
+            const cleanup = () => {
+                window.removeEventListener('zktls#initialized', onInitialized);
+                clearInterval(intervalId);
+            };
+            window.addEventListener('zktls#initialized', onInitialized);
+            const intervalId = setInterval(check, pollIntervalMs);
+        });
     }
 
-    ethers.AbiCoder.defaultAbiCoder();
+    if (ethers && ethers.AbiCoder) { ethers.AbiCoder.defaultAbiCoder(); }
 
     // src/extension.ts
     var PEER_EXTENSION_CHROME_URL = "https://chromewebstore.google.com/detail/peerauth-authenticate-and/ijpgccednehjpeclfcllnjjcmiohdjih";
@@ -766,19 +856,154 @@
     /** SDK version for debugging and proof metadata */
     const SDK_VERSION = '0.1.0';
 
+    /**
+     * Supported chains and token metadata for payments and verification.
+     * Apps can subset or extend; SDK uses this as the canonical source for RPC and token addresses.
+     */
+    /** Native ETH sentinel (zero address). Use for native transfer verification. */
+    const NATIVE_TOKEN_ADDRESS = '0x0000000000000000000000000000000000000000';
+    /** ERC20 Transfer event topic (Transfer(address,address,uint256)) */
+    const ERC20_TRANSFER_TOPIC = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
+    const BASE_RPC = 'https://mainnet.base.org';
+    const ETHEREUM_RPC = 'https://ethereum.publicnode.com';
+    const POLYGON_RPC = 'https://polygon-rpc.com';
+    const ARBITRUM_RPC = 'https://arb1.arbitrum.io/rpc';
+    const OPTIMISM_RPC = 'https://mainnet.optimism.io';
+    /** USDC addresses (Circle canonical mainnet). */
+    const USDC = {
+        1: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
+        8453: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+        137: '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359',
+        42161: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831',
+        10: '0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85',
+    };
+    /** USDT addresses (Tether, common mainnet). */
+    const USDT = {
+        1: '0xdAC17F958D2ee523a2206206994597C13D831ec7',
+        8453: '0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2',
+        137: '0xc2132D05D31c914a87C6611C10748AEb04B58e8F',
+        42161: '0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9',
+        10: '0x94b008aA00579c1307B0EF2c499aD98a8ce58e58',
+    };
+    function buildChains() {
+        const chains = {};
+        const entries = [
+            { chainId: 1, name: 'Ethereum', rpcUrl: ETHEREUM_RPC, usdc: USDC[1], usdt: USDT[1] },
+            { chainId: 8453, name: 'Base', rpcUrl: BASE_RPC, usdc: USDC[8453], usdt: USDT[8453] },
+            { chainId: 137, name: 'Polygon', rpcUrl: POLYGON_RPC, usdc: USDC[137], usdt: USDT[137] },
+            { chainId: 42161, name: 'Arbitrum One', rpcUrl: ARBITRUM_RPC, usdc: USDC[42161], usdt: USDT[42161] },
+            { chainId: 10, name: 'OP Mainnet', rpcUrl: OPTIMISM_RPC, usdc: USDC[10], usdt: USDT[10] },
+        ];
+        for (const { chainId, name, rpcUrl, usdc, usdt } of entries) {
+            chains[chainId] = {
+                name,
+                chainId,
+                rpcUrl,
+                tokens: [
+                    { address: NATIVE_TOKEN_ADDRESS, symbol: 'ETH', decimals: 18 },
+                    { address: usdc, symbol: 'USDC', decimals: 6 },
+                    { address: usdt, symbol: 'USDT', decimals: 6 },
+                ],
+            };
+        }
+        return chains;
+    }
+    /** Supported chains with name, rpcUrl, and default tokens (ETH, USDC, USDT). Apps can subset or extend. */
+    const SUPPORTED_CHAINS = buildChains();
+    /**
+     * Return the supported chain config. Use for "pay with wallet" UI (display names, USDC address, decimals)
+     * and for verification (RPC URL). Apps can pass a custom chain map to verifyPaymentTx if needed.
+     */
+    function getSupportedChains() {
+        return SUPPORTED_CHAINS;
+    }
+
+    /**
+     * On-chain verification of a direct payment tx (native or ERC20 to recipient).
+     */
+    /**
+     * Verify that a tx succeeded and that value (native or ERC20) reached the recipient.
+     * Uses SDK chain config for RPC unless rpcUrl is passed. Returns true only if the tx
+     * succeeded and the recipient received the payment.
+     */
+    async function verifyPaymentTx(params) {
+        const { txHash, chainId, recipientAddress, tokenAddress, rpcUrl } = params;
+        const chains = getSupportedChains();
+        const chain = chains[chainId];
+        const url = rpcUrl ?? chain?.rpcUrl;
+        if (!url) {
+            throw new Error(`No RPC URL for chainId ${chainId}. Pass rpcUrl or use a supported chain.`);
+        }
+        const receipt = await rpcCall(url, 'eth_getTransactionReceipt', [txHash]);
+        if (!receipt || !receipt.status) {
+            return false;
+        }
+        if (receipt.status !== '0x1') {
+            return false;
+        }
+        if (tokenAddress) {
+            const recipientTopic = addressToTopic(recipientAddress);
+            const hasTransferToRecipient = (receipt.logs ?? []).some((log) => log.address.toLowerCase() === tokenAddress.toLowerCase() &&
+                log.topics?.[0] === ERC20_TRANSFER_TOPIC &&
+                log.topics?.[2] === recipientTopic);
+            return hasTransferToRecipient;
+        }
+        const tx = await rpcCall(url, 'eth_getTransactionByHash', [txHash]);
+        if (!tx?.to || !tx.value) {
+            return false;
+        }
+        const valueWei = BigInt(tx.value);
+        if (valueWei === 0n) {
+            return false;
+        }
+        return tx.to.toLowerCase() === recipientAddress.toLowerCase();
+    }
+    function addressToTopic(address) {
+        const hex = address.startsWith('0x') ? address.slice(2).toLowerCase() : address.toLowerCase();
+        if (hex.length !== 40) {
+            throw new Error(`Invalid address: ${address}`);
+        }
+        return '0x' + hex.padStart(64, '0');
+    }
+    async function rpcCall(url, method, params) {
+        const res = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                jsonrpc: '2.0',
+                id: 1,
+                method,
+                params,
+            }),
+        });
+        if (!res.ok) {
+            throw new Error(`RPC request failed: ${res.status}`);
+        }
+        const json = (await res.json());
+        if (json.error) {
+            throw new Error(json.error.message ?? 'RPC error');
+        }
+        return json.result ?? null;
+    }
+
+    exports.DEFAULT_MAINNET_RPC_URL = DEFAULT_MAINNET_RPC_URL;
+    exports.ERC20_TRANSFER_TOPIC = ERC20_TRANSFER_TOPIC;
     exports.GAS_COST_MAX_FRACTION = GAS_COST_MAX_FRACTION;
     exports.MIN_DONATION_WARNING_USD = MIN_DONATION_WARNING_USD;
+    exports.NATIVE_TOKEN_ADDRESS = NATIVE_TOKEN_ADDRESS;
     exports.P2PAGO_DEFAULT_RECIPIENT = P2PAGO_DEFAULT_RECIPIENT;
     exports.P2PAGO_DEFAULT_REFERRER = P2PAGO_DEFAULT_REFERRER;
     exports.P2PAGO_FEE_MIN_USD = P2PAGO_FEE_MIN_USD;
     exports.P2PAGO_FEE_PERCENT = P2PAGO_FEE_PERCENT;
     exports.SDK_VERSION = SDK_VERSION;
+    exports.SUPPORTED_CHAINS = SUPPORTED_CHAINS;
     exports.ZKP2P_EXTENSION_INSTALL_URL = ZKP2P_EXTENSION_INSTALL_URL;
     exports.completeZkp2pDonation = completeZkp2pDonation;
     exports.fulfillIntent = fulfillIntent;
     exports.generateAndEncodeProof = generateAndEncodeProof;
     exports.getDonationStatus = getDonationStatus;
     exports.getQuote = getQuote;
+    exports.getSupportedChains = getSupportedChains;
     exports.getWalletStatus = getWalletStatus;
     exports.getZkp2pStatus = getZkp2pStatus;
     exports.handle402 = handle402;
@@ -786,8 +1011,11 @@
     exports.openDonation = openDonation;
     exports.openRedirectOnramp = openRedirectOnramp;
     exports.recordDonation = recordDonation;
+    exports.resolveRecipient = resolveRecipient;
     exports.runZkp2pDonation = runZkp2pDonation;
     exports.signalIntent = signalIntent;
     exports.verifyIntent = verifyIntent;
+    exports.verifyPaymentTx = verifyPaymentTx;
+    exports.whenExtensionAvailable = whenExtensionAvailable;
 
 }));

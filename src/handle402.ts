@@ -95,10 +95,20 @@ async function runZkp2pPath(
     chainId: body.chainId,
   });
 
+  // Resolve toAddress so verify/intent receives a 0x address (ZKP2P arrayify fails on ENS/fkey ids)
+  const resolvedToAddress = await resolveAddress(
+    quote.intent.toAddress,
+    options.provider
+  );
+  const intentForVerify: typeof quote.intent = {
+    ...quote.intent,
+    toAddress: resolvedToAddress,
+  };
+
   const verifyRes = await fetch(verifyUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(quote.intent),
+    body: JSON.stringify(intentForVerify),
   });
   if (!verifyRes.ok) {
     throw new Error(`Verify intent failed: ${verifyRes.status}`);

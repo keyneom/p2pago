@@ -32,7 +32,7 @@
       var isLocal = params.get('local') === '1';
       var src = isLocal
         ? '../dist/umd/zkp2p-donate.js'
-        : 'https://cdn.jsdelivr.net/gh/keyneom/p2pago@main/dist/umd/zkp2p-donate.js';
+        : 'https://cdn.jsdelivr.net/gh/keyneom/p2pago@main/docs/zkp2p-donate.js';
 
       var script = document.createElement('script');
       script.src = src;
@@ -65,7 +65,7 @@
       };
       script.onerror = function () {
         document.getElementById('status').textContent =
-          'Failed to load script from ' + src + '. For GitHub: ensure dist/ is committed and pushed.';
+          'Failed to load script from ' + src + '. Run npm run build:docs and commit docs/zkp2p-donate.js.';
         document.getElementById('status').classList.add('error');
       };
       document.head.appendChild(script);

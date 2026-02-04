@@ -118,11 +118,12 @@ The UMD bundle expects **`window.ethers`** at load time (used by the bundled Pee
 <script src="https://unpkg.com/@p2pago/zkp2p-donate/dist/umd/zkp2p-donate.js"></script>
 ```
 
-**From GitHub** (before npm publish, or for testing). Requires `dist/` to be committed:
+**From GitHub** (before npm publish; script is served from `docs/zkp2p-donate.js` in this repo):
 ```html
 <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
-<script src="https://cdn.jsdelivr.net/gh/keyneom/p2pago@main/dist/umd/zkp2p-donate.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/keyneom/p2pago@main/docs/zkp2p-donate.js"></script>
 ```
+Use `@main` for latest, or a tag for a release (e.g. `@v0.1.0`). After source changes, run `npm run build:docs` and commit `docs/zkp2p-donate.js`.
 
 Then use `window.Zkp2pDonate`:
 ```html

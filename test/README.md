@@ -23,19 +23,14 @@ npx serve .
 
 ## Test from GitHub (jsDelivr)
 
-1. Build and commit dist:
+The script-tag build is served from **docs/zkp2p-donate.js** (committed). After source changes:
 
-   ```bash
-   npm run build
-   git add -f dist/
-   git commit -m "Add dist for GitHub import test"
-   git push
-   ```
+1. Run `npm run build:docs`, then commit and push `docs/zkp2p-donate.js`.
 
 2. Open the demo (hosted anywhere, or use GitHub Pages):
 
    http://localhost:3000/test/demo.html
 
-   (Without `?local=1` it loads from `https://cdn.jsdelivr.net/gh/keyneom/p2pago@main/dist/umd/zkp2p-donate.js`)
+   (Without `?local=1` it loads from `https://cdn.jsdelivr.net/gh/keyneom/p2pago@main/docs/zkp2p-donate.js`)
 
 3. Or serve the repo and open the file directly.
