@@ -10,11 +10,11 @@ Client-side SDK for donations via **Venmo / Cash App** (ZKP2P) or **direct crypt
 
 A **client-side SDK** for accepting donations and optional **HTTP 402 (Payment Required)** flows:
 
-1. **Donations**: Let users pay you via **direct crypto** (send to your address) or **fiat → crypto** via **ZKP2P** (Venmo, Cash App, etc.). Recipient absorbs processing fees; donor sends the exact amount (exact-fiat).
-2. **Time-based “support status”**: Store when a user last donated (e.g. in `localStorage`) with **multiple accounts**. Check if the last donation is within a configured window; if not, your app can prompt again or gate features. All client-side, so it’s soft gating (bypassable); for hard gating, use 402 + server.
-3. **Optional 402 flow**: When your server returns **402 Payment Required**, the SDK can drive the client through pay → prove → retry. Supports **two proof types**: (a) **crypto** — user sends to an address, you get tx hash; (b) **ZKP2P** — user pays Venmo/etc., proof is submitted on-chain, you get the `fulfillIntent` tx hash. Server verifies the proof (on-chain) and returns 200. Useful for protecting server-side resources (e.g. API, download) behind payment.
+1. **Donations**: Let users pay you via **direct crypto** (send to your address) or **fiat → crypto** via **ZKP2P** (Venmo, Cash App, etc.). The donation button opens the hosted [peer.xyz](https://www.peer.xyz/swap) onramp with your recipient and amount prefilled — peer.xyz drives the full quote → wallet → payment → proof flow. For richer integrations, this package re-exports `@zkp2p/sdk` so you can build a custom UI without a second install.
+2. **Time-based "support status"**: Store when a user last donated (e.g. in `localStorage`) with **multiple accounts**. Check if the last donation is within a configured window; if not, your app can prompt again or gate features. All client-side, so it's soft gating (bypassable); for hard gating, use 402 + server.
+3. **Optional 402 flow**: When your server returns **402 Payment Required**, the SDK pays the body's recipient with a direct on-chain transfer (native or ERC-20) and returns a `PaymentProof` you retry with. The wire-format `PaymentProof` shape also covers a `'zkp2p'` variant for apps that roll their own ZKP2P flow via `Zkp2pClient` (re-exported); the built-in `handle402` only produces the `'crypto'` variant.
 
-**Audience**: App developers who want a single library for donation UX, optional “support expired” prompts, and optional 402-backed payment for server resources.
+**Audience**: App developers who want a single library for donation UX, optional "support expired" prompts, and optional 402-backed payment for server resources.
 
 ---
 
@@ -22,14 +22,9 @@ A **client-side SDK** for accepting donations and optional **HTTP 402 (Payment R
 
 ### Donation flow
 
-- **Direct crypto**: User sends to your address (you show address / QR). App (or SDK) records the tx hash and optional amount; you can store that for “last donation” and for 402 proof.
-- **ZKP2P (Venmo / Cash App / etc.)**:  
-  1. Get quote (exact-fiat, e.g. $5).  
-  2. Your backend calls ZKP2P `/verify/intent` (API key stays on server).  
-  3. User connects wallet; SDK calls `signalIntent` on ZKP2P Escrow (Base).  
-  4. User pays the quoted Venmo/Cash App recipient (out of band).  
-  5. User clicks “I’ve paid”; SDK uses PeerAuth extension to generate and encode proof, then calls `fulfillIntent`.  
-  Tokens are released to your `recipientAddress`. Recipient absorbs fees; donor sends the exact quoted amount.
+- **Direct crypto**: User sends to your address (you show address / QR). App (or SDK) records the tx hash and optional amount; you can store that for "last donation" and for 402 proof.
+- **ZKP2P (Venmo / Cash App / etc.) — redirect**: Call `openDonation({ amountUsd, recipientAddress, paymentPlatform })`. The hosted peer.xyz onramp opens in a new tab with your params prefilled and drives the full quote → wallet → payment → fulfillment flow itself. Recipient absorbs fees; donor sends the exact quoted amount.
+- **ZKP2P — embedded (advanced)**: For a custom UI, import `Zkp2pClient` and `createPeerExtensionSdk` from `@p2pago/zkp2p-donate` (re-exported from `@zkp2p/sdk`) and drive `getQuote → signalIntent → peer.authenticate → onMetadataMessage → fulfillIntent` yourself. See [peer's docs](https://docs.peer.xyz/) for the headless integration recipe.
 
 ### Time-based expiration (localStorage, multi-account)
 
@@ -51,24 +46,15 @@ A **client-side SDK** for accepting donations and optional **HTTP 402 (Payment R
     "chainId": 8453,
     "amountWei": "...",
     "amountFormatted": "0.001 ETH",
-    "label": "Premium access",
-    "zkp2p": { "enabled": true, "verifyUrl": "https://your-backend/verify-intent" }
+    "label": "Premium access"
   }
   ```
 
-  Client uses this to either (a) send crypto to `recipient` and get a tx hash, or (b) run the ZKP2P flow (quote → verify via `verifyUrl` → signalIntent → pay Venmo → proof → fulfillIntent) and get the fulfillIntent tx hash.
+- **Client**: `handle402(body, { signer, provider })` pays the recipient with a direct on-chain transfer (native or ERC-20) and returns `{ type: 'crypto', chainId, txHash, recipient, amount? }`. The app retries the original request with that proof (e.g. `Payment-Proof: <base64 JSON>`). Server verifies the tx on-chain and returns 200.
 
-- **Client**: SDK provides something like `handle402(response, options)` that:  
-  - Parses the 402 body.  
-  - If user chooses crypto: trigger send to `recipient`, return proof `{ type: 'crypto', chainId, txHash }`.  
-  - If user chooses ZKP2P: run donation flow to same `recipient`, return proof `{ type: 'zkp2p', chainId, txHash }` (fulfillIntent tx).  
-  Then the app **retries the original request** with a proof (e.g. `Payment-Proof: <base64 or JSON>` or a body field). Server verifies the tx on-chain (and optionally amount/recipient) and returns 200.
+- **ZKP2P-backed proofs**: The `PaymentProof` wire format also covers `{ type: 'zkp2p', chainId, txHash, ... }` for apps that build a ZKP2P payment flow on top of the re-exported `Zkp2pClient` and want to submit the `fulfillIntent` tx hash as the proof. The built-in `handle402` does not produce this variant.
 
-- **Proof format (for server)**: Unified shape the server can verify: e.g. `{ type: 'crypto' | 'zkp2p', chainId, txHash, recipient?, amount? }`. Server checks: tx exists on `chainId`, and (if needed) that the tx sent funds to `recipient`. For ZKP2P, the “payment” to you is the `fulfillIntent` tx, so that’s the tx hash the client sends.
-
-- **Dual proof**: Same 402 flow supports both “pay with wallet” (direct transfer) and “pay with Venmo” (ZKP2P). Server doesn’t care which; it only needs a valid tx that pays the right recipient.
-
-All of this is **possible**: 402 is in the HTTP spec; verification is “check this tx on this chain.” The SDK is client-only; the server implements 402 and verification in its own stack.
+All of this is **possible**: 402 is in the HTTP spec; verification is "check this tx on this chain." The SDK is client-only; the server implements 402 and verification in its own stack.
 
 ---
 
@@ -81,30 +67,34 @@ npm install @p2pago/zkp2p-donate
 ```
 
 ```js
+// p2pago value-add layer
 import {
   openDonation,
   openRedirectOnramp,
-  getQuote,
-  signalIntent,
-  fulfillIntent,
-  generateAndEncodeProof,
+  isSmallDonation,
   recordDonation,
   getDonationStatus,
   handle402,
-  runZkp2pDonation,
-  completeZkp2pDonation,
-  verifyIntent,
   getWalletStatus,
   getZkp2pStatus,
   whenExtensionAvailable,
-  isSmallDonation,
   resolveRecipient,
   verifyPaymentTx,
   getSupportedChains,
   ZKP2P_EXTENSION_INSTALL_URL,
+  PEER_ONRAMP_URL,
   P2PAGO_DEFAULT_RECIPIENT,
   P2PAGO_DEFAULT_REFERRER,
   MIN_DONATION_WARNING_USD,
+} from '@p2pago/zkp2p-donate';
+
+// Full @zkp2p/sdk surface, re-exported through the same install
+import {
+  Zkp2pClient,
+  createPeerExtensionSdk,
+  peerExtensionSdk,
+  PAYMENT_PLATFORMS,
+  SUPPORTED_CHAIN_IDS,
 } from '@p2pago/zkp2p-donate';
 ```
 
@@ -229,39 +219,40 @@ openRedirectOnramp({ recipientAddress: 'p2pago.fkey.id', amountUsd: 5 });
 
 ### Donation (headless ZKP2P)
 
-**Orchestration helper** (quote + verify + signal in one call):
+For apps that want a custom UI instead of redirecting to `peer.xyz`, use `Zkp2pClient` directly — it's re-exported from this package, so a single install is enough:
+
 ```js
-const { intentHash, payeeAddress, platform } = await runZkp2pDonation({
-  signer,
+import {
+  Zkp2pClient,
+  createPeerExtensionSdk,
+  recordDonation, // still useful for donor-status tracking
+} from '@p2pago/zkp2p-donate';
+
+// Needs a viem WalletClient (see @zkp2p/sdk docs for wallet setup).
+const client = new Zkp2pClient({ walletClient, chainId: 8453 });
+const peer = createPeerExtensionSdk();
+
+const quote = await client.getQuote({
+  paymentPlatforms: ['venmo'],
+  fiatCurrency: 'USD',
+  user: payerAddress,
   recipient: '0xYOUR_ADDRESS',
-  amountUsd: 5,
-  platform: 'venmo',
-  getVerifiedIntent: (intent) => yourBackend.verifyIntent(intent),
-  provider,
+  destinationChainId: 8453,
+  destinationToken: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', // USDC on Base
+  amount: '5',
+  isExactFiat: true,
 });
-// Show user: "Pay $5 to " + payeeAddress
-// After user pays:
-const { hash } = await completeZkp2pDonation(signer, intentHash, platform);
-await recordDonation('my-app', { txHash: hash, chainId: 8453 });
+
+const txHash = await client.signalIntent({ /* fields from quote.responseObject.quotes[0].intent */ });
+// Parse IntentSignaled from the receipt for the intentHash, then:
+peer.authenticate({ platform: 'venmo', actionType: 'transfer_venmo', captureMode: 'buyerTee', attestationServiceUrl: 'https://attestation-service.zkp2p.xyz' });
+peer.onMetadataMessage(async (msg) => {
+  const fulfillTx = await client.fulfillIntent({ intentHash, proof: { /* from msg */ }, attestationServiceUrl: '...' });
+  await recordDonation('my-app', { txHash: fulfillTx, chainId: 8453 });
+});
 ```
 
-**Manual steps** (same flow, more control):
-```js
-const quote = await getQuote({
-  recipient: '0xYOUR_ADDRESS', // or myapp.fkey.eth for recipient privacy
-  amountUsd: 5,
-  userAddress: await signer.getAddress(),
-  platform: 'venmo',
-  provider, // for ENS resolution (e.g. FluidKey)
-});
-const verified = await yourBackend.verifyIntent(quote.intent); // or use verifyIntent(quote.intent, { apiKey }) from serverless
-const intentHash = await signalIntent(signer, verified);
-// Show user: "Pay $5 to " + quote.payeeAddress + " (Venmo)"
-// User pays, then clicks "I've paid"
-const proofBytes = await generateAndEncodeProof(intentHash, quote.platform);
-const { hash } = await fulfillIntent(signer, proofBytes, intentHash);
-await recordDonation('my-app', { txHash: hash, chainId: 8453 });
-```
+Full reference (and the platform → `actionType` table for Venmo / Cash App / Revolut / Wise / etc.): see the [official Peer docs](https://docs.peer.xyz/developer/integrate-zkp2p/integrate-redirect-onramp). We deliberately don't wrap this flow — peer's surface evolves quickly and a wrapper would just add a maintenance tax.
 
 ### Donation (direct crypto)
 
@@ -292,18 +283,14 @@ When a request returns 402:
 const res = await fetch('/api/premium');
 if (res.status === 402) {
   const body = await res.json();
-  const proof = await handle402(body, {
-    signer,
-    recipient: body.recipient,
-    useZkp2p: true,
-    verifyUrl: body.zkp2p?.verifyUrl,
-    provider,
-  });
+  const proof = await handle402(body, { signer, provider });
   const retry = await fetch('/api/premium', {
     headers: { 'Payment-Proof': btoa(JSON.stringify(proof)) }
   });
 }
 ```
+
+`handle402` pays the 402 body's recipient with a direct on-chain transfer (native or ERC-20). For a ZKP2P-backed 402 flow, compose `Zkp2pClient` (re-exported from this package) directly and feed the resulting `fulfillIntent` tx hash into the `PaymentProof` shape yourself.
 
 ---
 
@@ -311,11 +298,13 @@ if (res.status === 402) {
 
 ### Redirect flow
 
-| Function                       | Description                                                                                                          |
-| ------------------------------ | -------------------------------------------------------------------------------------------------------------------- |
-| `openDonation(options?)`       | Open donation flow. Checks extension; throws if missing (or opens install page if `openInstallPageIfMissing: true`). |
-| `openRedirectOnramp(options?)` | Low-level: open Peer extension onramp. No extension check.                                                           |
-| `isSmallDonation(amountUsd)`   | Returns true if amount &lt; $2 (warning threshold).                                                                  |
+| Function                       | Description                                                              |
+| ------------------------------ | ------------------------------------------------------------------------ |
+| `openDonation(options?)`       | Open `peer.xyz/swap` with prefilled params. Optional small-amount guard. |
+| `openRedirectOnramp(options?)` | Same, without the small-amount guard.                                    |
+| `isSmallDonation(amountUsd)`   | Returns true if amount &lt; $2 (warning threshold).                      |
+
+The redirect flow no longer requires the Peer extension to start — the hosted UI handles wallet connect, quote, payment, and proof itself, and prompts the user to install the extension when it's actually needed.
 
 **openDonation / openRedirectOnramp options:**
 
@@ -324,30 +313,19 @@ if (res.status === 402) {
 | `recipientAddress`         | string                   | `p2pago.fkey.id` | Recipient address or ENS. Set to your address to receive donations. |
 | `amountUsd`                | number \| string         | —                | Amount in USD.                                                      |
 | `inputAmount`              | string \| number         | —                | Overrides amountUsd; exact decimal string.                          |
-| `paymentPlatform`          | string                   | —                | `'venmo'` or `'cashapp'`. User can change in extension.             |
+| `paymentPlatform`          | string                   | —                | `'venmo'`, `'cashapp'`, etc. User can change on peer.xyz.           |
 | `referrer`                 | string                   | `'p2pago'`       | Attribution string (app name).                                      |
-| `referrerLogo`             | string                   | —                | Logo URL for extension UI.                                          |
+| `referrerLogo`             | string                   | —                | Logo URL for the hosted UI.                                         |
 | `callbackUrl`              | string                   | —                | URL to return to after completion.                                  |
 | `inputCurrency`            | string                   | `'USD'`          | Fiat currency.                                                      |
-| `toToken`                  | string                   | Base USDC        | `chainId:tokenAddress`.                                             |
+| `toToken`                  | string                   | Base USDC        | `chainId:tokenAddress` or plain `0x…`.                              |
+| `target`                   | string                   | `'_blank'`       | `window.open` target — `'_self'` to navigate the current tab.       |
 | `onSmallAmountWarning`     | (msg) => boolean \| void | —                | Callback when amount &lt; $2. Return `false` to abort.              |
-| `openInstallPageIfMissing` | boolean                  | `false`          | If true, open Chrome Web Store instead of throwing.                 |
+| `openInstallPageIfMissing` | boolean                  | `false`          | Retained for back-compat; no-op now that the hosted UI handles install prompts. |
 
 ### Headless ZKP2P
 
-| Function                                              | Description                                                                                 |
-| ----------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| `getQuote(options)`                                   | Fetch quote from ZKP2P. Resolves ENS (FluidKey) if provider given.                          |
-| `verifyIntent(intent, { apiKey, apiBaseUrl? })`       | Call ZKP2P `/verify/intent`. Use from backend (API key stays on server).                    |
-| `signalIntent(signer, verifiedIntent)`                | Call Escrow.signalIntent. Returns intentHash.                                               |
-| `fulfillIntent(signer, proofBytes, intentHash)`       | Call Escrow.fulfillIntent. Returns `{ hash }`.                                              |
-| `generateAndEncodeProof(intentHash, platform)`        | Generate proof via PeerAuth extension. Returns encoded bytes.                               |
-| `runZkp2pDonation(options)`                           | Quote → verify (callback) → signalIntent. Returns `{ intentHash, payeeAddress, platform }`. |
-| `completeZkp2pDonation(signer, intentHash, platform)` | Generate proof → fulfillIntent. Call after user pays.                                       |
-
-**getQuote options:** `recipient`, `amountUsd`, `userAddress` (required), `platform?`, `chainId?`, `destinationToken?`, `provider?` (for ENS; optional if ethers is installed — SDK uses default mainnet RPC), `apiBaseUrl?`.
-
-**Signer** (ethers/viem compatible): `getAddress(): Promise<string>`, `sendTransaction(tx): Promise<{ hash }>`.
+For everything beyond the redirect button, this package re-exports the full [`@zkp2p/sdk`](https://www.npmjs.com/package/@zkp2p/sdk) surface — `Zkp2pClient`, `createPeerExtensionSdk`, `peerExtensionSdk`, `PAYMENT_PLATFORMS`, `SUPPORTED_CHAIN_IDS`, types, and the rest. Import them from `@p2pago/zkp2p-donate` and consult [peer's docs](https://docs.peer.xyz/) for usage. We do not wrap them — peer's API is evolving and a wrapper would be a tax to maintain.
 
 ### Donation recording
 
@@ -358,11 +336,11 @@ if (res.status === 402) {
 
 ### 402 flow
 
-| Function                   | Description                                                 |
-| -------------------------- | ----------------------------------------------------------- |
-| `handle402(body, options)` | Parse 402 body, pay (crypto or ZKP2P), return PaymentProof. |
+| Function                   | Description                                                      |
+| -------------------------- | ---------------------------------------------------------------- |
+| `handle402(body, options)` | Parse 402 body, pay via on-chain transfer, return `PaymentProof`. |
 
-**handle402 options:** `signer`, `recipient`, `useZkp2p`, `verifyUrl?` (required when useZkp2p), `provider?` (for ENS; optional if ethers is installed).
+**handle402 options:** `signer` (required), `provider?` (for ENS / FluidKey).
 
 ### Resolve recipient and verify direct payments
 
@@ -375,14 +353,16 @@ if (res.status === 402) {
 | Function                           | Returns                                                                                                                                                                                            |
 | ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `getWalletStatus()`                | `{ available: boolean }` (checks `window.ethereum`)                                                                                                                                                |
-| `getZkp2pStatus()`                 | `{ available, needsInstall?, proofAvailable? }` — `available` when redirect onramp can open (`window.peer` or `window.zktls`); `proofAvailable` when proof generation is possible (`window.zktls`) |
+| `getZkp2pStatus()`                 | `{ available, needsInstall?, proofAvailable? }` — reports whether the Peer extension is installed. The redirect flow no longer requires it; `proofAvailable` is retained for legacy callers that gated on `window.zktls`. |
 | `whenExtensionAvailable(options?)` | `Promise<void>` — wait for extension (e.g. after async injection); listens for `zktls#initialized` and polls until available or `timeoutMs` (default 3000)                                         |
 
 ---
 
 ## PeerAuth extension
 
-The ZKP2P (Venmo / Cash App) path requires the **Peer extension**. The redirect onramp (`openDonation` / `openRedirectOnramp`) uses `window.peer` (Peer SDK); proof generation (`generateAndEncodeProof`) uses `window.zktls`. The SDK treats extension as **available** when either `peer` or `zktls` is present, so the onramp can open in environments where only `peer` is injected. Use `getZkp2pStatus().proofAvailable` if you need to know whether the user can complete the headless proof step. When the extension is not installed, `generateAndEncodeProof` throws with the install URL. Use `getZkp2pStatus()` to drive your UI and `whenExtensionAvailable({ timeoutMs })` to avoid flashing "not installed" when the extension injects after load.
+The **redirect** flow (`openDonation` / `openRedirectOnramp`) no longer requires the Peer extension to start — `peer.xyz` drives the whole flow itself and surfaces an install prompt inline when capture is needed. You still get `getZkp2pStatus()` and `whenExtensionAvailable({ timeoutMs })` if you want to pre-flight the install in your own UI.
+
+The **headless** flow (`Zkp2pClient` + `createPeerExtensionSdk`, both re-exported from `@zkp2p/sdk`) still needs the extension for payment-capture (`peer.authenticate` + `peer.onMetadataMessage`). The extension version must be 0.6.0 or newer — older releases used a deeplink onramp API that peer has removed.
 
 ---
 
@@ -420,12 +400,11 @@ No ZKP2P-specific server logic is required for verification: both crypto and ZKP
 
 | Feature           | Description                                                                                                                                               |
 | ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Redirect flow     | `openDonation()` / `openRedirectOnramp()` — gasless, Peer extension side panel. Referrer defaults to "p2pago".                                            |
-| ZKP2P headless    | Quote → verify (backend) → signalIntent → user pays Venmo/etc → PeerAuth proof → fulfillIntent. Recipient absorbs fees; donor sends exact amount.         |
+| Redirect flow     | `openDonation()` / `openRedirectOnramp()` — opens `peer.xyz/swap` with prefilled params. Referrer defaults to "p2pago".                                   |
+| Headless ZKP2P    | `Zkp2pClient` + `createPeerExtensionSdk` re-exported from `@zkp2p/sdk` directly (no wrapper).                                                              |
 | Direct crypto     | User sends to your address; app records tx hash.                                                                                                          |
 | Time-based status | localStorage (or custom store) per accountId; getDonationStatus(accountId, { maxAgeMs }); app prompts or soft-gates. Bypassable; for hard gating use 402. |
-| 402 flow          | Server returns 402 with payment spec; client pays (crypto or ZKP2P) and retries with proof; server verifies tx on-chain.                                  |
-| Dual proof        | Crypto = tx hash of transfer. ZKP2P = tx hash of fulfillIntent. Same proof shape for server.                                                              |
+| 402 flow          | Server returns 402 with payment spec; client pays via direct transfer and retries with proof; server verifies tx on-chain.                                |
 | Distribution      | npm package + UMD script tag.                                                                                                                             |
 
 ---

@@ -11,11 +11,23 @@ export interface WalletStatus {
   available: boolean;
 }
 
-/** ZKP2P PeerAuth extension status. `available` true when redirect onramp can be opened (peer or zktls). */
+/**
+ * PeerAuth extension status.
+ *
+ * Since Peer extension 0.6.0 removed the deeplink/side-panel API, the redirect
+ * onramp no longer needs the extension installed (it opens peer.xyz directly).
+ * `available` therefore reports whether the extension is present, but
+ * `openRedirectOnramp` / `openDonation` no longer gate on it.
+ *
+ * `proofAvailable` is retained for legacy callers that gated on the old
+ * `window.zktls` injection used by pre-0.6.0 extensions. New flows should
+ * use `peer.authenticate` + `peer.onMetadataMessage` from `@zkp2p/sdk`
+ * (re-exported by this package).
+ */
 export interface Zkp2pStatus {
   available: boolean;
   needsInstall?: boolean;
-  /** True when proof generation (generateAndEncodeProof) is possible; requires window.zktls */
+  /** Legacy: true when `window.zktls` is present (pre-0.6.0 extension). */
   proofAvailable?: boolean;
 }
 
@@ -36,9 +48,9 @@ export function getWalletStatus(): WalletStatus {
 }
 
 /**
- * Check if the Peer extension is available for the redirect onramp (Venmo/Cash App).
- * Uses the same globals the onramp flow uses: window.peer (Peer SDK) or window.zktls.
- * When only peer is present, openDonation/openRedirectOnramp work; proof generation requires zktls.
+ * Check if the Peer extension is installed.
+ * The redirect onramp no longer requires the extension — it opens peer.xyz directly.
+ * The proof-generation path still requires `window.zktls`.
  */
 export function getZkp2pStatus(): Zkp2pStatus {
   if (typeof window === 'undefined') {

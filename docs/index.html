@@ -17,9 +17,22 @@
       justify-content: center;
     }
     h1 { margin: 0 0 0.5rem; font-size: 1.5rem; }
-    p { color: #666; margin: 0 0 1.5rem; font-size: 0.95rem; }
+    p { color: #666; margin: 0 0 1rem; font-size: 0.95rem; }
+    label { display: block; font-size: 0.85rem; font-weight: 500; margin-top: 0.75rem; margin-bottom: 0.25rem; color: #374151; }
+    input, select {
+      width: 100%;
+      padding: 0.5rem 0.75rem;
+      font-size: 0.95rem;
+      border: 1px solid #d1d5db;
+      border-radius: 6px;
+    }
+    input:focus, select:focus { outline: none; border-color: #2563eb; }
+    .row { display: flex; gap: 0.75rem; }
+    .row label { flex: 0 0 auto; margin-top: 0.5rem; }
+    .row input, .row select { flex: 1; }
     button {
       width: 100%;
+      margin-top: 1.25rem;
       padding: 1rem 1.5rem;
       font-size: 1.1rem;
       font-weight: 500;
@@ -48,33 +61,58 @@
   <h1>Support p2pago</h1>
   <p>Donate via Venmo or Cash App. No wallet or crypto needed — just the Peer extension.</p>
 
-  <button id="donate-btn" disabled>Donate $5</button>
+  <form id="opts">
+    <label for="recipient">Recipient (address or ENS, e.g. p2pago.fkey.id)</label>
+    <input type="text" id="recipient" value="p2pago.fkey.id" placeholder="p2pago.fkey.id or 0x...">
+
+    <label for="amount">Amount (USD)</label>
+    <input type="number" id="amount" value="5" min="0.01" step="0.01">
+
+    <p style="font-size: 0.85rem; color: #6b7280; margin-top: 0.5rem;">ENS (e.g. p2pago.fkey.id) is resolved on Ethereum mainnet; the address is valid on any EVM chain. With Peer you pay via Venmo/Cash App—the extension sends to Base (or your chosen chain). No network option needed.</p>
+  </form>
+
+  <button id="donate-btn" disabled>Donate</button>
 
   <div id="status" class="status">Loading…</div>
 
   <p class="link"><a href="https://github.com/keyneom/p2pago">p2pago SDK on GitHub</a></p>
 
-  <script src="./zkp2p-donate.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
+  <!-- Cache-bust: change ?v= when you run npm run build:docs so browser loads latest bundle -->
+  <script src="/docs/zkp2p-donate.js?v=2"></script>
   <script>
     (function () {
       var status = document.getElementById('status');
       var btn = document.getElementById('donate-btn');
+      var recipientInput = document.getElementById('recipient');
+      var amountInput = document.getElementById('amount');
 
       if (typeof window.Zkp2pDonate === 'undefined') {
         status.textContent = 'SDK failed to load.';
         status.classList.add('error');
         return;
       }
+      if (typeof window.ethers === 'undefined') {
+        status.textContent = 'ethers failed to load (required for ENS resolution).';
+        status.classList.add('error');
+        return;
+      }
 
       var sdk = window.Zkp2pDonate;
-      status.textContent = 'Ready.';
+      var ethers = window.ethers;
+      status.textContent = 'Ready. Set options above and click Donate.';
       btn.disabled = false;
 
-      btn.onclick = function () {
+      btn.onclick = async function () {
+        status.textContent = 'Resolving recipient…';
+        status.classList.remove('error');
         try {
-          sdk.openDonation({
-            recipientAddress: 'p2pago.fkey.id',
-            amountUsd: 5,
+          var recipient = recipientInput.value.trim() || 'p2pago.fkey.id';
+          var amount = parseFloat(amountInput.value) || 5;
+
+          await sdk.openDonation({
+            recipientAddress: recipient,
+            amountUsd: amount,
             openInstallPageIfMissing: true,
           });
           status.textContent = 'Check the Peer extension panel.';

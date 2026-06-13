@@ -11,7 +11,7 @@ async function main() {
 
   const checks = [];
 
-  // 1. New exports exist
+  // 1. Value-add exports (our layer)
   const required = [
     'getZkp2pStatus',
     'whenExtensionAvailable',
@@ -21,11 +21,34 @@ async function main() {
     'SUPPORTED_CHAINS',
     'NATIVE_TOKEN_ADDRESS',
     'ERC20_TRANSFER_TOPIC',
+    'openDonation',
+    'openRedirectOnramp',
+    'isSmallDonation',
+    'handle402',
+    'recordDonation',
+    'getDonationStatus',
+    'PEER_ONRAMP_URL',
+    'P2PAGO_DEFAULT_RECIPIENT',
   ];
   for (const name of required) {
     const ok = typeof sdk[name] === 'function' || (typeof sdk[name] === 'object' && sdk[name] !== null) || typeof sdk[name] === 'string';
     checks.push({ name: `export ${name}`, ok });
     if (!ok) console.error('  Missing or wrong type:', name);
+  }
+
+  // 1b. @zkp2p/sdk re-exports — full SDK surface available through one install
+  const reExported = [
+    'Zkp2pClient',
+    'createPeerExtensionSdk',
+    'peerExtensionSdk',
+    'PEER_EXTENSION_CHROME_URL',
+    'PAYMENT_PLATFORMS',
+    'SUPPORTED_CHAIN_IDS',
+  ];
+  for (const name of reExported) {
+    const ok = sdk[name] !== undefined;
+    checks.push({ name: `sdk re-export ${name}`, ok });
+    if (!ok) console.error('  Missing SDK re-export:', name);
   }
 
   // 2. getZkp2pStatus (no window in Node -> available: false)

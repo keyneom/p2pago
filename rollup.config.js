@@ -11,6 +11,9 @@ export default {
     name: 'Zkp2pDonate',
     globals: {
       ethers: 'ethers',
+      '@zkp2p/sdk': 'Zkp2pSdk',
+      viem: 'viem',
+      'viem/chains': 'viemChains',
       crypto: 'crypto',
       http: 'http',
       https: 'https',
@@ -25,6 +28,9 @@ export default {
   },
   external: [
     'ethers',
+    '@zkp2p/sdk',
+    'viem',
+    'viem/chains',
     'crypto',
     'http',
     'https',
