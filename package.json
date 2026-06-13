@@ -1,5 +1,5 @@
 {
-  "name": "@p2pago/zkp2p-donate",
+  "name": "p2pago",
   "version": "0.1.0",
   "description": "Client-side SDK for ZKP2P donations, support status, and HTTP 402 payment flows",
   "main": "dist/cjs/index.js",

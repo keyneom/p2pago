@@ -24,7 +24,7 @@ A **client-side SDK** for accepting donations and optional **HTTP 402 (Payment R
 
 - **Direct crypto**: User sends to your address (you show address / QR). App (or SDK) records the tx hash and optional amount; you can store that for "last donation" and for 402 proof.
 - **ZKP2P (Venmo / Cash App / etc.) — redirect**: Call `openDonation({ amountUsd, recipientAddress, paymentPlatform })`. The hosted peer.xyz onramp opens in a new tab with your params prefilled and drives the full quote → wallet → payment → fulfillment flow itself. Recipient absorbs fees; donor sends the exact quoted amount.
-- **ZKP2P — embedded (advanced)**: For a custom UI, import `Zkp2pClient` and `createPeerExtensionSdk` from `@p2pago/zkp2p-donate` (re-exported from `@zkp2p/sdk`) and drive `getQuote → signalIntent → peer.authenticate → onMetadataMessage → fulfillIntent` yourself. See [peer's docs](https://docs.peer.xyz/) for the headless integration recipe.
+- **ZKP2P — embedded (advanced)**: For a custom UI, import `Zkp2pClient` and `createPeerExtensionSdk` from `p2pago` (re-exported from `@zkp2p/sdk`) and drive `getQuote → signalIntent → peer.authenticate → onMetadataMessage → fulfillIntent` yourself. See [peer's docs](https://docs.peer.xyz/) for the headless integration recipe.
 
 ### Time-based expiration (localStorage, multi-account)
 
@@ -63,7 +63,7 @@ All of this is **possible**: 402 is in the HTTP spec; verification is "check thi
 ### npm (bundler)
 
 ```bash
-npm install @p2pago/zkp2p-donate
+npm install p2pago
 ```
 
 ```js
@@ -86,7 +86,7 @@ import {
   P2PAGO_DEFAULT_RECIPIENT,
   P2PAGO_DEFAULT_REFERRER,
   MIN_DONATION_WARNING_USD,
-} from '@p2pago/zkp2p-donate';
+} from 'p2pago';
 
 // Full @zkp2p/sdk surface, re-exported through the same install
 import {
@@ -95,7 +95,7 @@ import {
   peerExtensionSdk,
   PAYMENT_PLATFORMS,
   SUPPORTED_CHAIN_IDS,
-} from '@p2pago/zkp2p-donate';
+} from 'p2pago';
 ```
 
 ### Browser (script tag)
@@ -105,7 +105,7 @@ The UMD bundle expects **`window.ethers`** at load time (used by the bundled Pee
 **From npm** (after publish):
 ```html
 <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
-<script src="https://unpkg.com/@p2pago/zkp2p-donate/dist/umd/zkp2p-donate.js"></script>
+<script src="https://unpkg.com/p2pago/dist/umd/zkp2p-donate.js"></script>
 ```
 
 **From GitHub** (before npm publish; script is served from `docs/zkp2p-donate.js` in this repo):
@@ -142,7 +142,7 @@ Use `getWalletStatus()` and `getZkp2pStatus()` to drive your payment UI:
 ZKP2P is always offered as a payment option. Extension availability only affects whether the headless flow runs in-place or the app must guide the user (install extension first, or redirect).
 
 ```js
-import { getWalletStatus, getZkp2pStatus, ZKP2P_EXTENSION_INSTALL_URL } from '@p2pago/zkp2p-donate';
+import { getWalletStatus, getZkp2pStatus, ZKP2P_EXTENSION_INSTALL_URL } from 'p2pago';
 
 const wallet = getWalletStatus();
 const zkp2p = getZkp2pStatus();
@@ -191,7 +191,7 @@ Opens the Peer extension side panel. Gasless; no wallet or backend required. Req
 **Simple one-liner** — `openDonation` checks extension, optionally warns on small amounts:
 
 ```js
-import { openDonation } from '@p2pago/zkp2p-donate';
+import { openDonation } from 'p2pago';
 
 // Throws if extension missing (or use openInstallPageIfMissing: true to open install page)
 openDonation({
@@ -208,7 +208,7 @@ openDonation({
 **Lower-level** — `openRedirectOnramp` (no extension check):
 
 ```js
-import { openRedirectOnramp, getZkp2pStatus, ZKP2P_EXTENSION_INSTALL_URL } from '@p2pago/zkp2p-donate';
+import { openRedirectOnramp, getZkp2pStatus, ZKP2P_EXTENSION_INSTALL_URL } from 'p2pago';
 
 if (!getZkp2pStatus().available) {
   window.open(ZKP2P_EXTENSION_INSTALL_URL);
@@ -226,7 +226,7 @@ import {
   Zkp2pClient,
   createPeerExtensionSdk,
   recordDonation, // still useful for donor-status tracking
-} from '@p2pago/zkp2p-donate';
+} from 'p2pago';
 
 // Needs a viem WalletClient (see @zkp2p/sdk docs for wallet setup).
 const client = new Zkp2pClient({ walletClient, chainId: 8453 });
@@ -325,7 +325,7 @@ The redirect flow no longer requires the Peer extension to start — the hosted 
 
 ### Headless ZKP2P
 
-For everything beyond the redirect button, this package re-exports the full [`@zkp2p/sdk`](https://www.npmjs.com/package/@zkp2p/sdk) surface — `Zkp2pClient`, `createPeerExtensionSdk`, `peerExtensionSdk`, `PAYMENT_PLATFORMS`, `SUPPORTED_CHAIN_IDS`, types, and the rest. Import them from `@p2pago/zkp2p-donate` and consult [peer's docs](https://docs.peer.xyz/) for usage. We do not wrap them — peer's API is evolving and a wrapper would be a tax to maintain.
+For everything beyond the redirect button, this package re-exports the full [`@zkp2p/sdk`](https://www.npmjs.com/package/@zkp2p/sdk) surface — `Zkp2pClient`, `createPeerExtensionSdk`, `peerExtensionSdk`, `PAYMENT_PLATFORMS`, `SUPPORTED_CHAIN_IDS`, types, and the rest. Import them from `p2pago` and consult [peer's docs](https://docs.peer.xyz/) for usage. We do not wrap them — peer's API is evolving and a wrapper would be a tax to maintain.
 
 ### Donation recording
 

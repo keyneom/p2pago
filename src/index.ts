@@ -1,5 +1,5 @@
 /**
- * @p2pago/zkp2p-donate — public surface.
+ * p2pago — public surface.
  *
  * Two layers:
  *
